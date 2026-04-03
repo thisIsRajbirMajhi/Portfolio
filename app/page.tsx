@@ -410,9 +410,20 @@ const ContactForm = () => {
 
 export default function Portfolio() {
   const [lang, setLang] = useState<Language>('English');
+  const [activeFilter, setActiveFilter] = useState('All');
   const [cards, setCards] = useState(initialProjects);
   const [revealedProjects, setRevealedProjects] = useState<Set<number>>(new Set());
   const [activeSection, setActiveSection] = useState('');
+
+  const allTags = Array.from(new Set(initialProjects.flatMap(p => p.tags)));
+
+  useEffect(() => {
+    if (activeFilter === 'All') {
+      setCards(initialProjects);
+    } else {
+      setCards(initialProjects.filter(p => p.tags.includes(activeFilter)));
+    }
+  }, [activeFilter]);
 
   // Smooth Scrolling Setup
   useEffect(() => {
@@ -700,6 +711,24 @@ export default function Portfolio() {
         <ZoomSection id="projects" className="space-y-12">
           <Heading title="Featured Projects" subtitle="Click the top card to reveal the next piece of digital craftsmanship." />
           
+          <div className="flex flex-wrap justify-center gap-3 mb-8">
+            <button
+              onClick={() => setActiveFilter('All')}
+              className={`px-5 py-2 rounded-full text-sm font-medium transition-colors ${activeFilter === 'All' ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            >
+              All
+            </button>
+            {allTags.map(tag => (
+              <button
+                key={tag}
+                onClick={() => setActiveFilter(tag)}
+                className={`px-5 py-2 rounded-full text-sm font-medium transition-colors ${activeFilter === tag ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
+
           <div className="relative h-[700px] md:h-[450px] max-w-5xl mx-auto w-full perspective-1000">
             <AnimatePresence mode="popLayout">
               {cards.map((project, index) => {
