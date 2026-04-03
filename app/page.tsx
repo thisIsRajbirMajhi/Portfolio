@@ -141,47 +141,174 @@ const ZoomSection = ({ children, className = "", id }: { children: React.ReactNo
 };
 
 const ScratchOverlay = ({ onReveal }: { onReveal: () => void }) => {
-  const [scratched, setScratched] = useState<Set<number>>(new Set());
-  const total = 100; // 10x10 grid
-  
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isScratching, setIsScratching] = useState(false);
+  const lastPos = useRef<{ x: number; y: number } | null>(null);
+  const checkTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
-    if (scratched.size > total * 0.35) {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+
+    const initCanvas = () => {
+      const parent = canvas.parentElement;
+      if (!parent) return;
+      
+      canvas.width = parent.clientWidth;
+      canvas.height = parent.clientHeight;
+      
+      // Create metallic gradient
+      const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+      gradient.addColorStop(0, '#cbd5e1');
+      gradient.addColorStop(0.5, '#94a3b8');
+      gradient.addColorStop(1, '#cbd5e1');
+      
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Add scratch card texture/noise
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+      for (let i = 0; i < 2000; i++) {
+        ctx.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, 2, 2);
+      }
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+      for (let i = 0; i < 2000; i++) {
+        ctx.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, 2, 2);
+      }
+
+      // Add text with shadow
+      ctx.shadowColor = 'rgba(255, 255, 255, 0.5)';
+      ctx.shadowBlur = 4;
+      ctx.shadowOffsetX = 1;
+      ctx.shadowOffsetY = 1;
+      ctx.font = 'bold 22px sans-serif';
+      ctx.fillStyle = '#334155';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('✨ Scratch to Reveal ✨', canvas.width / 2, canvas.height / 2);
+      
+      // Reset shadow for scratching
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
+    };
+
+    initCanvas();
+    window.addEventListener('resize', initCanvas);
+    return () => window.removeEventListener('resize', initCanvas);
+  }, []);
+
+  const getCoordinates = (e: React.MouseEvent | React.TouchEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    let clientX, clientY;
+    
+    if ('touches' in e) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = (e as React.MouseEvent).clientX;
+      clientY = (e as React.MouseEvent).clientY;
+    }
+    
+    return {
+      x: clientX - rect.left,
+      y: clientY - rect.top
+    };
+  };
+
+  const checkReveal = () => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const pixels = imageData.data;
+    let transparent = 0;
+
+    for (let i = 3; i < pixels.length; i += 4) {
+      if (pixels[i] < 128) transparent++;
+    }
+
+    if (transparent / (pixels.length / 4) > 0.4) {
       onReveal();
     }
-  }, [scratched.size, onReveal]);
+  };
 
-  const handleHover = (i: number) => {
-    setScratched(prev => {
-      if (prev.has(i)) return prev;
-      return new Set(prev).add(i);
-    });
+  const startScratching = (e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation();
+    setIsScratching(true);
+    lastPos.current = getCoordinates(e);
+    
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (ctx && lastPos.current) {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.beginPath();
+      ctx.arc(lastPos.current.x, lastPos.current.y, 25, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
+
+  const stopScratching = (e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation();
+    setIsScratching(false);
+    lastPos.current = null;
+    checkReveal();
+  };
+
+  const scratch = (e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation();
+    if (!isScratching) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx || !lastPos.current) return;
+
+    const { x, y } = getCoordinates(e);
+
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.lineWidth = 50;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    ctx.beginPath();
+    ctx.moveTo(lastPos.current.x, lastPos.current.y);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+
+    lastPos.current = { x, y };
+
+    if (!checkTimeout.current) {
+      checkTimeout.current = setTimeout(() => {
+        checkReveal();
+        checkTimeout.current = null;
+      }, 100);
+    }
   };
 
   return (
     <motion.div 
       initial={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="absolute inset-0 z-50 grid grid-cols-10 grid-rows-10 rounded-[2.5rem] overflow-hidden"
-      onClick={(e) => {
-        e.stopPropagation();
-        onReveal();
-      }}
+      className="absolute inset-0 z-50 rounded-[2.5rem] overflow-hidden cursor-crosshair"
+      onClick={(e) => e.stopPropagation()}
     >
-      {Array.from({ length: total }).map((_, i) => (
-        <motion.div
-          key={i}
-          onHoverStart={() => handleHover(i)}
-          onPointerDown={() => handleHover(i)}
-          animate={{ opacity: scratched.has(i) ? 0 : 1 }}
-          transition={{ duration: 0.15 }}
-          className="bg-slate-200 border-[0.5px] border-slate-300/20 cursor-crosshair"
-        />
-      ))}
-      <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-        <span className="bg-white/90 text-slate-700 px-6 py-3 rounded-full font-bold shadow-lg backdrop-blur-sm">
-          Hover or Click to Reveal
-        </span>
-      </div>
+      <canvas
+        ref={canvasRef}
+        className="w-full h-full touch-none"
+        onMouseDown={startScratching}
+        onMouseUp={stopScratching}
+        onMouseLeave={stopScratching}
+        onMouseMove={scratch}
+        onTouchStart={startScratching}
+        onTouchEnd={stopScratching}
+        onTouchCancel={stopScratching}
+        onTouchMove={scratch}
+      />
     </motion.div>
   );
 };
@@ -632,7 +759,7 @@ export default function Portfolio() {
                         </button>
                         {isTop && (
                           <p className="text-center text-xs text-gray-400 mt-4 animate-pulse">
-                            {!revealedProjects.has(project.id) ? "Click anywhere to reveal, or scratch the image" : "Click card to view next project"}
+                            {!revealedProjects.has(project.id) ? "Scratch the image or click the card to reveal" : "Click card to view next project"}
                           </p>
                         )}
                       </div>
